@@ -1,0 +1,149 @@
+#include<ThingSpeak.h>
+#include<ESP8266WiFi.h>
+#include<ESP8266WebServer.h>
+
+int LED = 2; // Assign LED pin i.e: D1 on NodeMCU
+int EXT_RELAY = 5; // Assign LED pin i.e: D1 on NodeMCU
+int SOR_SENSOR = A0;  /* Connect Soil moisture analog sensor pin to A0 of NodeMCU */
+boolean led_status = false;
+int internet_relay_data;
+int moisture_percentage;
+int mosture;
+int min_moist_threashold = 40;
+int max_moist_threashold = 60;
+//  int map_low = 350;
+// int map_high = 130;
+  int map_low = 0;
+  int map_high = 600;
+
+int relay_mode=0;  // 0 is AUTO, 1 is WEB
+boolean relayStatus = false;
+
+unsigned long channel_num=1199834;
+const char* ssid="Mitesh";
+const char* password="Mite$hP@tel";
+const char * myCounterReadAPIKey = "Thingspeak Read API Key";
+const char * myCounterWriteAPIKey = "Thingspeak Write API Key";
+
+WiFiClient client;   // make the client of the WiFi which connect to the ThingSpeak webServer
+ESP8266WebServer server(80);    // make the naother server
+
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(LED, OUTPUT);
+  pinMode(EXT_RELAY, OUTPUT);
+  Serial.begin(115200);
+  WiFi.begin(ssid,password);    // connect to the wifi STA connection
+  Serial.print("Connecting");
+  while(WiFi.status()!=WL_CONNECTED)
+  {
+      delay(500);
+      Serial.print(".");
+  }
+  Serial.print("\n IP : ");
+  Serial.print(WiFi.localIP());// print the wifi local ip
+  Serial.print("\n");
+  server.on("/",handleonconnect);    // in urt type the "/" then call the handle on connect function
+  ThingSpeak.begin(client);      // connect the client to the thingSpeak server
+  server.begin();   // start the server
+  led_status = ThingSpeak.readFloatField(channel_num,1,myCounterReadAPIKey);    // rad the last data of the field 
+  relay_mode = ThingSpeak.readFloatField(channel_num,3,myCounterReadAPIKey);    // rad the last data of the field 
+  moisture_percentage = ThingSpeak.readFloatField(channel_num,2,myCounterReadAPIKey);
+  min_moist_threashold = ThingSpeak.readFloatField(channel_num,4,myCounterReadAPIKey);
+  max_moist_threashold = ThingSpeak.readFloatField(channel_num,5,myCounterReadAPIKey);
+
+}
+
+void loop() {
+  mosture=analogRead(SOR_SENSOR);
+//  moisture_percentage = ( 100.00 - ( (mosture/1023.00) * 100.00 ) );
+moisture_percentage = map(mosture, map_low, map_high, 0,100);
+  Serial.print("Soil Moisture(in Percentage) = ");
+  Serial.print(moisture_percentage);
+  
+  Serial.print("% moisture : ");
+  Serial.println(mosture);
+
+  ThingSpeak.writeField(channel_num,2,moisture_percentage,myCounterWriteAPIKey);
+  ThingSpeak.writeField(channel_num,6,mosture,myCounterWriteAPIKey);
+  relay_mode = ThingSpeak.readFloatField(channel_num,3,myCounterReadAPIKey);    // rad the last data of the field 
+  
+  // put your main code here, to run repeatedly:
+  server.handleClient();    // it realy handle the Client
+  Serial.print("Relay : ");
+  Serial.print(led_status);
+    Serial.print(", Mode : ");
+  Serial.println(relay_mode);
+
+  if(relay_mode==0){
+    Serial.println("In AUTO mode");
+
+    // led status is used because every time it should not go and turn relay on even if it is on
+    if(moisture_percentage>max_moist_threashold){
+      digitalWrite(LED, HIGH); // turn the LED off THIS IS INVERTED I DONT KNOW WHY
+      digitalWrite(EXT_RELAY, HIGH); // turn the LED ON
+      Serial.println("LED OFF : BY SENSOR");
+      ThingSpeak.writeField(channel_num,1,0,myCounterWriteAPIKey);
+      led_status = false;
+    }
+
+    // led status is used because every time it should not go and turn relay off even if it is off
+    if(moisture_percentage<min_moist_threashold){
+       digitalWrite(LED, LOW); // turn the LED ON THIS IS INVERTED I DONT KNOW WHY
+       digitalWrite(EXT_RELAY, LOW); // turn the LED OFF
+       Serial.println("LED ON : BY SENSOR");    
+       ThingSpeak.writeField(channel_num,1,1,myCounterWriteAPIKey);
+       led_status = true;
+    }
+
+  }
+  if(relay_mode==1){
+        Serial.println("In WEB mode");
+        internet_relay_data=ThingSpeak.readFloatField(channel_num,1,myCounterReadAPIKey);    // rad the last data of the field 
+      if(internet_relay_data==1)
+      {
+        digitalWrite(LED, LOW); // turn the LED off THIS IS INVERTED I DONT KNOW WHY
+        digitalWrite(EXT_RELAY, LOW); // turn the LED ON
+        Serial.println("LED ON : BY WEBSITE");
+        led_status = true;
+      }
+      else if(internet_relay_data==0)
+      {
+         digitalWrite(LED, HIGH); // turn the LED ON THIS IS INVERTED I DONT KNOW WHY
+         digitalWrite(EXT_RELAY, HIGH); // turn the LED OFF
+         Serial.println("LED OFF : BY WEBSITE");
+         led_status = false;
+      }
+  }
+  delay(20000);
+}
+
+void handleonconnect()
+{
+  server.send(200,"text/html",SendHTML());
+}
+
+String SendHTML(void){
+  String ptr = "<!DOCTYPE html> <html>\n";
+  ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
+  ptr +="<title>LED Control</title>\n";
+  ptr +="<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
+  ptr +="body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} h3 {color: #444444;margin-bottom: 50px;}\n";
+  ptr +=".button {display: block;width: 80px;background-color: #1abc9c;border: none;color: white;padding: 13px 30px;text-decoration: none;font-size: 25px;margin: 0px auto 35px;cursor: pointer;border-radius: 4px;}\n";
+  ptr +=".button-on {background-color: #1abc9c;}\n";
+  ptr +=".button-on:active {background-color: #16a085;}\n";
+  ptr +=".button-off {background-color: #34495e;}\n";
+  ptr +=".button-off:active {background-color: #2c3e50;}\n";
+  ptr +="p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
+ ptr +="</style>\n";
+ ptr +="</head>\n";
+ ptr +="<body>\n";
+ ptr +="<h1>ESP8266 with ThingSpeak Server</h1>\n";
+ ptr +="<h3>Using Station(STA) Mode</h3>\n";
+ ptr +="<h4>Control status For D1 is "+ String(internet_relay_data) +"</h4>\n";
+ ptr +="<a class=\"button button-on\" href=\"https://api.thingspeak.com/update?api_key=WZRY7PAW1OI011JG&field1=1\">ON</a>\n";
+ ptr +="<a class=\"button button-off\" href=\"https://api.thingspeak.com/update?api_key=WZRY7PAW1OI011JG&field1=0\">OFF</a>\n";
+ ptr +="</body>\n";
+ ptr +="</html>\n";
+ return ptr;
+}
